@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WSN ARQ vs FEC Hata Kontrolü Simülasyonu</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0f172a; color: #f8fafc; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow-x: hidden; }
+        .canvas-container { background: #1e293b; border-radius: 0.5rem; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3); border: 1px solid #334155; }
+        input[type=range] { accent-color: #38bdf8; }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col p-4 gap-4">
+
+    <!-- Üst Kontrol Paneli -->
+    <div class="bg-slate-800 p-4 border border-slate-700 rounded-lg flex flex-wrap justify-between items-center gap-4 shadow-lg shrink-0">
+        <div>
+            <h1 class="text-2xl font-bold text-sky-400">WSN Hata Kontrolü (ARQ vs FEC vs Adaptif)</h1>
+            <p class="text-sm text-slate-400">Gürültüye Göre Protokol Değiştiren Hibrit Sistem</p>
+        </div>
+        
+        <div class="flex items-center gap-6">
+            <!-- BER Slider -->
+            <div class="flex flex-col w-48">
+                <div class="flex justify-between">
+                    <label class="text-xs text-slate-300 font-semibold mb-1">Kanal Gürültüsü (BER)</label>
+                    <span id="berValue" class="text-xs text-sky-400 font-bold">0.0100</span>
+                </div>
+                <input type="range" id="sliderBER" min="0" max="0.05" step="0.001" value="0.01">
+            </div>
+
+            <div class="h-10 w-px bg-slate-600"></div>
+
+            <!-- Hız Slider -->
+            <div class="flex flex-col w-32">
+                <div class="flex justify-between">
+                    <label class="text-xs text-slate-300 font-semibold mb-1">Simülasyon Hızı</label>
+                    <span id="speedValue" class="text-xs text-sky-400 font-bold">1.0x</span>
+                </div>
+                <input type="range" id="sliderSpeed" min="0.2" max="5.0" step="0.2" value="1.0">
+            </div>
+
+            <div class="h-10 w-px bg-slate-600"></div>
+
+            <!-- Butonlar -->
+            <button id="btnPlay" class="bg-sky-600 hover:bg-sky-500 text-white px-6 py-2 rounded font-semibold shadow transition-colors w-28">
+                Durdur
+            </button>
+            <button id="btnReset" class="bg-slate-600 hover:bg-slate-500 text-white px-4 py-2 rounded font-semibold shadow transition-colors">
+                Sıfırla
+            </button>
+        </div>
+    </div>
+
+    <!-- Orta Panel: Animasyon -->
+    <div class="canvas-container flex-1 flex flex-col min-h-[400px] p-2 relative">
+        <!-- Lejant -->
+        <div class="flex flex-wrap justify-center items-center gap-x-6 gap-y-2 text-xs text-slate-400 mb-2 border-b border-slate-700 pb-2">
+            <p><span class="inline-block w-3 h-3 bg-green-500 rounded-full mr-1"></span> <strong>Yeşil:</strong> Başarılı İletim</p>
+            <p><span class="inline-block w-3 h-3 bg-red-500 rounded-full mr-1"></span> <strong>Kırmızı:</strong> Gürültüden Bozuldu</p>
+            <p><span class="inline-block w-3 h-3 bg-yellow-400 rounded-sm mr-1"></span> <strong>Sarı (FIX):</strong> Bozuldu ama FEC Düzeltildi</p>
+            <p><span class="inline-block w-3 h-3 bg-gray-500 rounded-full mr-1"></span> <strong>Gri (NACK):</strong> ARQ Tekrar İstek Paketi</p>
+            <p class="text-purple-400 font-bold">Adaptif Mod: BER < 0.015 (ARQ), BER >= 0.015 (FEC)</p>
+        </div>
+        <div class="flex-1 relative w-full">
+            <canvas id="animCanvas" class="absolute inset-0 w-full h-full rounded-b-lg"></canvas>
+        </div>
+    </div>
+
+    <!-- Alt Panel: Grafikler -->
+    <div class="flex gap-4 h-64 shrink-0">
+        <!-- Throughput Grafiği -->
+        <div class="canvas-container flex-1 p-3 flex flex-col relative">
+            <div class="absolute top-2 right-4 flex flex-col items-end text-xs font-semibold gap-1 z-10 bg-slate-800/80 p-2 rounded">
+                <span class="text-blue-400">ARQ: <span id="lblArqTp">0</span> pkt</span>
+                <span class="text-green-400">FEC: <span id="lblFecTp">0</span> pkt</span>
+                <span class="text-purple-400">Adaptif: <span id="lblAdpTp">0</span> pkt</span>
+            </div>
+            <h2 class="text-sm font-semibold text-slate-200 mb-2">Başarılı İletilen Paket (Throughput)</h2>
+            <div class="flex-1 relative">
+                <canvas id="tpCanvas" class="w-full h-full"></canvas>
+            </div>
+        </div>
+
+        <!-- Enerji Grafiği -->
+        <div class="canvas-container flex-1 p-3 flex flex-col relative">
+            <div class="absolute top-2 right-4 flex flex-col items-end text-xs font-semibold gap-1 z-10 bg-slate-800/80 p-2 rounded">
+                <span class="text-red-400">ARQ Enj: <span id="lblArqEn">0</span></span>
+                <span class="text-orange-400">FEC Enj: <span id="lblFecEn">0</span></span>
+                <span class="text-fuchsia-400">Adp Enj: <span id="lblAdpEn">0</span></span>
+            </div>
+            <h2 class="text-sm font-semibold text-slate-200 mb-2">Toplam Harcanan Enerji (Radyo + CPU)</h2>
+            <div class="flex-1 relative">
+                <canvas id="enCanvas" class="w-full h-full"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- SİSTEM PARAMETRELERİ ---
+        const packet_size_arq = 100;      
+        const packet_size_fec = 125;      
+        const fec_max_correctable = 3;    
+
+        const e_tx_bit = 0.1;             
+        const e_rx_bit = 0.1;             
+        const e_cpu_correction = 5.0;     
+
+        // --- SİMÜLASYON DURUMU ---
+        let isPlaying = true;
+        let currentBer = 0.010;
+        let speedMultiplier = 1.0;
+        
+        // Görsel Ayarlar
+        let basePacketSpeed = 150; 
+        let spawnInterval = 1.5;   
+        let timeSinceLastSpawn = 0;
+
+        let arqPackets = [];
+        let fecPackets = [];
+        let adpPackets = [];
+        let lastTime = 0;
+
+        // İstatistikler
+        let stats = {
+            arq_succ: 0, fec_succ: 0, adp_succ: 0,
+            arq_en: 0.0, fec_en: 0.0, adp_en: 0.0,
+            history_tp_arq: [], history_tp_fec: [], history_tp_adp: [],
+            history_en_arq: [], history_en_fec: [], history_en_adp: []
+        };
+
+        // --- DOM ELEMANLARI ---
+        const animCanvas = document.getElementById('animCanvas');
+        const ctxAnim = animCanvas.getContext('2d');
+        const tpCanvas = document.getElementById('tpCanvas');
+        const ctxTp = tpCanvas.getContext('2d');
+        const enCanvas = document.getElementById('enCanvas');
+        const ctxEn = enCanvas.getContext('2d');
+
+        function resizeCanvases() {
+            [animCanvas, tpCanvas, enCanvas].forEach(c => {
+                c.width = c.parentElement.clientWidth;
+                c.height = c.parentElement.clientHeight;
+            });
+        }
+        window.addEventListener('resize', resizeCanvases);
+        resizeCanvases();
+
+        // --- MATEMATİK & OLASILIK FONKSİYONLARI ---
+        function comb(n, k) {
+            if (k === 0) return 1;
+            if (k === 1) return n;
+            if (k === 2) return n * (n - 1) / 2;
+            if (k === 3) return n * (n - 1) * (n - 2) / 6;
+            return 1;
+        }
+
+        function calcProbabilities(ber) {
+            let p_arq_success = Math.pow(1 - ber, packet_size_arq);
+            let p_fec_perfect = Math.pow(1 - ber, packet_size_fec);
+            let p_fec_success = 0;
+            
+            for (let k = 0; k <= fec_max_correctable; k++) {
+                p_fec_success += comb(packet_size_fec, k) * Math.pow(ber, k) * Math.pow(1 - ber, packet_size_fec - k);
+            }
+            
+            let p_fec_corrected = p_fec_success - p_fec_perfect;
+            
+            return {
+                arq_succ: p_arq_success,
+                fec_succ: p_fec_success,
+                fec_perf: p_fec_perfect,
+                fec_corr: p_fec_corrected
+            };
+        }
+
+        // --- KONTROLLER ---
+        document.getElementById('btnPlay').addEventListener('click', (e) => {
+            isPlaying = !isPlaying;
+            e.target.textContent = isPlaying ? "Durdur" : "Başlat";
+            e.target.className = isPlaying 
+                ? "bg-sky-600 hover:bg-sky-500 text-white px-6 py-2 rounded font-semibold shadow transition-colors w-28"
+                : "bg-red-600 hover:bg-red-500 text-white px-6 py-2 rounded font-semibold shadow transition-colors w-28";
+        });
+
+        document.getElementById('btnReset').addEventListener('click', () => {
+            arqPackets = []; fecPackets = []; adpPackets = [];
+            stats.arq_succ = 0; stats.fec_succ = 0; stats.adp_succ = 0;
+            stats.arq_en = 0.0; stats.fec_en = 0.0; stats.adp_en = 0.0;
+            stats.history_tp_arq = []; stats.history_tp_fec = []; stats.history_tp_adp = [];
+            stats.history_en_arq = []; stats.history_en_fec = []; stats.history_en_adp = [];
+            timeSinceLastSpawn = 0;
+            updateLabels();
+        });
+
+        document.getElementById('sliderBER').addEventListener('input', (e) => {
+            currentBer = parseFloat(e.target.value);
+            document.getElementById('berValue').textContent = currentBer.toFixed(4);
+        });
+
+        document.getElementById('sliderSpeed').addEventListener('input', (e) => {
+            speedMultiplier = parseFloat(e.target.value);
+            document.getElementById('speedValue').textContent = speedMultiplier.toFixed(1) + "x";
+        });
+
+        function updateLabels() {
+            document.getElementById('lblArqTp').textContent = stats.arq_succ;
+            document.getElementById('lblFecTp').textContent = stats.fec_succ;
+            document.getElementById('lblAdpTp').textContent = stats.adp_succ;
+            document.getElementById('lblArqEn').textContent = Math.floor(stats.arq_en);
+            document.getElementById('lblFecEn').textContent = Math.floor(stats.fec_en);
+            document.getElementById('lblAdpEn').textContent = Math.floor(stats.adp_en);
+        }
+
+        // --- ANİMASYON MANTIĞI ---
+        function spawnPackets() {
+            let probs = calcProbabilities(currentBer);
+            
+            // Başlangıç x pozisyonu
+            let startX = Math.min(100, animCanvas.width * 0.15);
+
+            // ARQ Paketi
+            let arqStatus = Math.random() < probs.arq_succ ? 'success' : 'error';
+            arqPackets.push({ x: startX, status: arqStatus, direction: 1 });
+            stats.arq_en += packet_size_arq * e_tx_bit;
+
+            // FEC Paketi
+            let r = Math.random();
+            let fecStatus = r < probs.fec_perf ? 'perfect' : (r < probs.fec_succ ? 'corrected' : 'error');
+            fecPackets.push({ x: startX, status: fecStatus, direction: 1 });
+            stats.fec_en += packet_size_fec * e_tx_bit;
+
+            // Adaptif (Hibrit) Paket
+            let useFEC = currentBer >= 0.015; // Gürültü eşiği
+            if (!useFEC) {
+                let adpStatus = Math.random() < probs.arq_succ ? 'success' : 'error';
+                adpPackets.push({ x: startX, status: adpStatus, direction: 1, type: 'arq' });
+                stats.adp_en += packet_size_arq * e_tx_bit;
+            } else {
+                let r2 = Math.random();
+                let adpStatus = r2 < probs.fec_perf ? 'perfect' : (r2 < probs.fec_succ ? 'corrected' : 'error');
+                adpPackets.push({ x: startX, status: adpStatus, direction: 1, type: 'fec' });
+                stats.adp_en += packet_size_fec * e_tx_bit;
+            }
+        }
+
+        // --- ÇİZİM FONKSİYONLARI ---
+        function drawNetwork() {
+            ctxAnim.clearRect(0, 0, animCanvas.width, animCanvas.height);
+            
+            const w = animCanvas.width;
+            const h = animCanvas.height;
+            const arqY = h * 0.2; 
+            const fecY = h * 0.5; 
+            const adpY = h * 0.8; 
+            
+            const boxW = Math.min(120, w * 0.15);
+            const boxH = 50;
+            const startX = 20;
+            const endX = w - boxW - 20;
+
+            // Arka plan çizgileri (Kanallar)
+            ctxAnim.beginPath();
+            ctxAnim.moveTo(startX + boxW, arqY); ctxAnim.lineTo(endX, arqY);
+            ctxAnim.moveTo(startX + boxW, fecY); ctxAnim.lineTo(endX, fecY);
+            ctxAnim.moveTo(startX + boxW, adpY); ctxAnim.lineTo(endX, adpY);
+            ctxAnim.strokeStyle = 'rgba(148, 163, 184, 0.2)';
+            ctxAnim.setLineDash([10, 10]);
+            ctxAnim.lineWidth = 2;
+            ctxAnim.stroke();
+            ctxAnim.setLineDash([]);
+
+            // İstasyon Çizim Fonksiyonu
+            function drawStation(x, y, color, title) {
+                ctxAnim.fillStyle = color;
+                ctxAnim.fillRect(x, y - boxH/2, boxW, boxH);
+                ctxAnim.strokeStyle = '#cbd5e1';
+                ctxAnim.lineWidth = 2;
+                ctxAnim.strokeRect(x, y - boxH/2, boxW, boxH);
+                ctxAnim.fillStyle = 'white';
+                ctxAnim.font = 'bold 11px sans-serif';
+                ctxAnim.textAlign = 'center';
+                ctxAnim.fillText(title, x + boxW/2, y + 4);
+            }
+
+            // İstasyonlar
+            drawStation(startX, arqY, '#1e3a8a', 'Gönderici (ARQ)'); 
+            drawStation(endX, arqY, '#7f1d1d', 'Alıcı (ARQ)');       
+            drawStation(startX, fecY, '#14532d', 'Gönderici (FEC)'); 
+            drawStation(endX, fecY, '#78350f', 'Alıcı (FEC)');       
+            
+            let adpCurrentMode = currentBer >= 0.015 ? 'FEC' : 'ARQ';
+            drawStation(startX, adpY, '#4c1d95', `Gön. Adp (${adpCurrentMode})`); 
+            drawStation(endX, adpY, '#831843', 'Alıcı (Adaptif)');   
+
+            // ARQ Paketlerini Çiz
+            arqPackets.forEach(p => {
+                ctxAnim.beginPath();
+                ctxAnim.arc(p.x, arqY - (p.direction === -1 ? 15 : 0), 12, 0, Math.PI*2);
+                ctxAnim.fillStyle = p.status === 'success' ? '#22c55e' : (p.status === 'error' ? '#ef4444' : '#64748b');
+                ctxAnim.fill();
+                ctxAnim.strokeStyle = '#ffffff';
+                ctxAnim.lineWidth = 1.5;
+                ctxAnim.stroke();
+                
+                ctxAnim.fillStyle = '#ffffff';
+                ctxAnim.font = '10px sans-serif';
+                ctxAnim.fillText(p.status === 'success' ? 'OK' : (p.status === 'error' ? 'ERR' : 'NACK'), p.x, arqY - (p.direction === -1 ? 15 : 0) + 3);
+            });
+
+            // FEC Paketlerini Çiz
+            fecPackets.forEach(p => {
+                ctxAnim.fillStyle = p.status === 'perfect' ? '#22c55e' : (p.status === 'corrected' ? '#eab308' : '#ef4444');
+                ctxAnim.fillRect(p.x - 12, fecY - 12, 24, 24);
+                ctxAnim.strokeStyle = '#ffffff';
+                ctxAnim.lineWidth = 1.5;
+                ctxAnim.strokeRect(p.x - 12, fecY - 12, 24, 24);
+                
+                ctxAnim.fillStyle = (p.status === 'corrected') ? '#000000' : '#ffffff';
+                ctxAnim.font = '10px sans-serif';
+                ctxAnim.fillText(p.status === 'perfect' ? 'OK' : (p.status === 'corrected' ? 'FIX' : 'DROP'), p.x, fecY + 3);
+            });
+
+            // Adaptif Paketlerini Çiz
+            adpPackets.forEach(p => {
+                if (p.type === 'arq') {
+                    ctxAnim.beginPath();
+                    ctxAnim.arc(p.x, adpY - (p.direction === -1 ? 15 : 0), 12, 0, Math.PI*2);
+                    ctxAnim.fillStyle = p.status === 'success' ? '#22c55e' : (p.status === 'error' ? '#ef4444' : '#64748b');
+                    ctxAnim.fill();
+                    ctxAnim.strokeStyle = '#ffffff';
+                    ctxAnim.lineWidth = 1.5;
+                    ctxAnim.stroke();
+                    
+                    ctxAnim.fillStyle = '#ffffff';
+                    ctxAnim.font = '10px sans-serif';
+                    ctxAnim.fillText(p.status === 'success' ? 'OK' : (p.status === 'error' ? 'ERR' : 'NACK'), p.x, adpY - (p.direction === -1 ? 15 : 0) + 3);
+                } else {
+                    ctxAnim.fillStyle = p.status === 'perfect' ? '#22c55e' : (p.status === 'corrected' ? '#eab308' : '#ef4444');
+                    ctxAnim.fillRect(p.x - 12, adpY - 12, 24, 24);
+                    ctxAnim.strokeStyle = '#ffffff';
+                    ctxAnim.lineWidth = 1.5;
+                    ctxAnim.strokeRect(p.x - 12, adpY - 12, 24, 24);
+                    
+                    ctxAnim.fillStyle = (p.status === 'corrected') ? '#000000' : '#ffffff';
+                    ctxAnim.font = '10px sans-serif';
+                    ctxAnim.fillText(p.status === 'perfect' ? 'OK' : (p.status === 'corrected' ? 'FIX' : 'DROP'), p.x, adpY + 3);
+                }
+            });
+        }
+
+        function drawLineChart(ctx, data1, data2, data3, color1, color2, color3) {
+            ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+            const w = ctx.canvas.width;
+            const h = ctx.canvas.height;
+            const padding = 10;
+            
+            if (data1.length < 2) return;
+
+            let maxVal = 10; 
+            data1.forEach(v => { if (v > maxVal) maxVal = v; });
+            data2.forEach(v => { if (v > maxVal) maxVal = v; });
+            data3.forEach(v => { if (v > maxVal) maxVal = v; });
+
+            function drawPath(data, color) {
+                ctx.beginPath();
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2.5;
+                
+                for(let i = 0; i < data.length; i++) {
+                    let x = padding + (i / (data.length - 1)) * (w - padding*2);
+                    let y = h - padding - (data[i] / maxVal) * (h - padding*2);
+                    
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+            }
+
+            // Izgara çizgileri
+            ctx.beginPath();
+            ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+            ctx.moveTo(padding, h - padding); ctx.lineTo(w - padding, h - padding);
+            ctx.moveTo(padding, padding); ctx.lineTo(padding, h - padding);
+            ctx.stroke();
+
+            // Çizgileri çiz
+            drawPath(data1, color1); // ARQ
+            drawPath(data2, color2); // FEC
+            drawPath(data3, color3); // Adaptif
+        }
+
+        // --- ANA OYUN DÖNGÜSÜ ---
+        function gameLoop(timestamp) {
+            if (!lastTime) lastTime = timestamp;
+            let deltaTime = (timestamp - lastTime) / 1000; 
+            lastTime = timestamp;
+
+            if (isPlaying) {
+                // Zamanlama
+                timeSinceLastSpawn += deltaTime * speedMultiplier;
+                if (timeSinceLastSpawn >= spawnInterval) {
+                    spawnPackets();
+                    timeSinceLastSpawn = 0;
+                    
+                    stats.history_tp_arq.push(stats.arq_succ);
+                    stats.history_tp_fec.push(stats.fec_succ);
+                    stats.history_tp_adp.push(stats.adp_succ);
+                    stats.history_en_arq.push(stats.arq_en);
+                    stats.history_en_fec.push(stats.fec_en);
+                    stats.history_en_adp.push(stats.adp_en);
+
+                    const maxHistory = 50;
+                    if (stats.history_tp_arq.length > maxHistory) {
+                        stats.history_tp_arq.shift(); stats.history_tp_fec.shift(); stats.history_tp_adp.shift();
+                        stats.history_en_arq.shift(); stats.history_en_fec.shift(); stats.history_en_adp.shift();
+                    }
+                    updateLabels();
+                }
+
+                const w = animCanvas.width;
+                const endX = w - Math.min(120, w * 0.15) - 20; 
+                const startX = Math.min(120, w * 0.15) + 20;   
+                const moveDist = basePacketSpeed * deltaTime * speedMultiplier;
+
+                let probs = calcProbabilities(currentBer);
+
+                // ARQ Paket Hareketi
+                for (let i = arqPackets.length - 1; i >= 0; i--) {
+                    let p = arqPackets[i];
+                    p.x += moveDist * p.direction;
+
+                    if (p.direction === 1 && p.x >= endX) { 
+                        stats.arq_en += packet_size_arq * e_rx_bit;
+                        if (p.status === 'success') {
+                            stats.arq_succ++;
+                            arqPackets.splice(i, 1);
+                        } else {
+                            p.direction = -1;
+                            p.status = 'nack';
+                        }
+                    } else if (p.direction === -1 && p.x <= startX) { 
+                        p.direction = 1;
+                        p.status = Math.random() < probs.arq_succ ? 'success' : 'error';
+                        stats.arq_en += packet_size_arq * e_tx_bit; 
+                    }
+                }
+
+                // FEC Paket Hareketi
+                for (let i = fecPackets.length - 1; i >= 0; i--) {
+                    let p = fecPackets[i];
+                    p.x += moveDist;
+
+                    if (p.x >= endX) { 
+                        stats.fec_en += packet_size_fec * e_rx_bit;
+                        
+                        if (p.status === 'perfect') {
+                            stats.fec_succ++;
+                        } else if (p.status === 'corrected') {
+                            stats.fec_en += e_cpu_correction; 
+                            stats.fec_succ++;
+                        }
+                        fecPackets.splice(i, 1);
+                    }
+                }
+
+                // Adaptif Paket Hareketi
+                for (let i = adpPackets.length - 1; i >= 0; i--) {
+                    let p = adpPackets[i];
+                    if (p.type === 'arq') {
+                        p.x += moveDist * p.direction;
+                        if (p.direction === 1 && p.x >= endX) { 
+                            stats.adp_en += packet_size_arq * e_rx_bit;
+                            if (p.status === 'success') {
+                                stats.adp_succ++;
+                                adpPackets.splice(i, 1);
+                            } else {
+                                p.direction = -1;
+                                p.status = 'nack';
+                            }
+                        } else if (p.direction === -1 && p.x <= startX) { 
+                            p.direction = 1;
+                            p.status = Math.random() < probs.arq_succ ? 'success' : 'error';
+                            stats.adp_en += packet_size_arq * e_tx_bit; 
+                        }
+                    } else { // FEC tipi paket
+                        p.x += moveDist;
+                        if (p.x >= endX) { 
+                            stats.adp_en += packet_size_fec * e_rx_bit;
+                            if (p.status === 'perfect') {
+                                stats.adp_succ++;
+                            } else if (p.status === 'corrected') {
+                                stats.adp_en += e_cpu_correction; 
+                                stats.adp_succ++;
+                            }
+                            adpPackets.splice(i, 1);
+                        }
+                    }
+                }
+            }
+
+            // Çizimler
+            drawNetwork();
+            drawLineChart(ctxTp, stats.history_tp_arq, stats.history_tp_fec, stats.history_tp_adp, '#60a5fa', '#4ade80', '#c084fc'); 
+            drawLineChart(ctxEn, stats.history_en_arq, stats.history_en_fec, stats.history_en_adp, '#f87171', '#fb923c', '#e879f9'); 
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Başlat
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
