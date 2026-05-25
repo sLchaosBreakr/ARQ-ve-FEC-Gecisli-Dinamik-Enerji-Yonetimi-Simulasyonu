@@ -1,8 +1,12 @@
 # ARQ-ve-FEC-Gecisli-Dinamik-Enerji-Yonetimi-Simulasyonu
 Gürültülü Kablosuz Sensör  Ağlarında Adaptif Hata Kontrolü
 
-**Hazırlayan:** Mustafa Selman Uğuz  
-**Öğrenci No:** 22370031083  
+## 👤 Öğrenci ve Üniversite Bilgileri
+* **Ad Soyad:** Mustafa Selman UĞUZ
+* **Öğrenci Numarası:** 22370031083
+* **Üniversite:** Necmettin Erbakan Üniversitesi
+* **Akademisyen:** Dr. Öğr. Üyesi Dr. HASAN SERDAR
+* **Ders:** Kablosuz Algılayıcı Ağları
 
 ## 📌 Proje Hakkında
 Bu proje, Kablosuz Sensör Ağları (WSN - Wireless Sensor Networks) ortamında yaygın olarak kullanılan hata kontrol mekanizmalarını (ARQ ve FEC) karşılaştırmalı olarak analiz etmek amacıyla geliştirilmiş, tarayıcı tabanlı interaktif bir simülasyondur. 
